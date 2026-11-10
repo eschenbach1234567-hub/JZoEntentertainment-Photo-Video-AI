@@ -11,6 +11,10 @@ jobs:
         with:
           python-version: "3.11"
       - name: Abhängigkeiten (ohne KI)
-        run: pip install "numpy<2" opencv-python-headless
-      - name: Rauchtest ohne KI-Modelle
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install "numpy<2" opencv-python-headless
+      - name: Rauchtest Foto (ohne KI-Modelle)
         run: python tests/test_synthetic.py
+      - name: Rauchtest Video (ohne KI)
+        run: python tests/test_video.py --no-ki

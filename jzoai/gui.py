@@ -11,10 +11,11 @@ import cv2
 import numpy as np
 from PySide6.QtCore import QPoint, QRect, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout,
-                               QGroupBox, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-                               QPlainTextEdit, QProgressBar, QPushButton, QSlider, QSpinBox,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox,
+                               QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
+                               QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar,
+                               QPushButton, QSlider, QSpinBox, QVBoxLayout, QWidget)
+import threading
 
 from . import device
 from .classic import resize_to
@@ -160,6 +161,132 @@ class View(QWidget):
         self.update()
 
 
+class VideoDialog(QDialog):
+    """Video-Werkzeug: Upscaling, Entrauschen, Stabilisieren, Bildrate (siehe video.py)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Video-Modul")
+        self.resize(560, 640)
+        self.worker: Worker | None = None
+        self.cancel = threading.Event()
+
+        self.src = QLineEdit()
+        self.src.setPlaceholderText("Videodatei wählen …")
+        b_src = QPushButton("…")
+        b_src.clicked.connect(self.pick_src)
+        row = QHBoxLayout()
+        row.addWidget(self.src, 1)
+        row.addWidget(b_src)
+
+        self.engine = QComboBox()
+        self.engine.addItems(["Schnell (ffmpeg-Filter)", "KI (Real-ESRGAN, sehr langsam)"])
+        self.engine.currentIndexChanged.connect(self.on_engine)
+        self.upscale = QComboBox()
+        self.denoise = self._slider(40)
+        self.sharpen = self._slider(30)
+        self.stabilize = QCheckBox("Stabilisieren (Verwacklungen glätten)")
+        self.fps = QComboBox()
+        self.fps.addItems(["wie Original", "30", "50", "60"])
+        self.interp = QComboBox()
+        self.interp.addItems(["bewegungsbasiert (besser, langsam)", "Überblendung (schnell)"])
+        self.codec = QComboBox()
+        self.codec.addItems(["x264", "x265", "videotoolbox"])
+        self.start = QDoubleSpinBox()
+        self.start.setRange(0, 86400)
+        self.start.setSuffix(" s")
+        self.seconds = QDoubleSpinBox()
+        self.seconds.setRange(0, 86400)
+        self.seconds.setSpecialValueText("ganzes Video")
+        self.seconds.setSuffix(" s")
+        self.seconds.setValue(10)
+
+        form = QFormLayout()
+        form.addRow("Video", row)
+        for label, w in (("Verfahren", self.engine), ("Upscaling", self.upscale),
+                         ("Entrauschen", self.denoise), ("Schärfen", self.sharpen), ("", self.stabilize),
+                         ("Bildrate", self.fps), ("Zwischenbilder", self.interp), ("Codec", self.codec),
+                         ("Start bei", self.start), ("Länge", self.seconds)):
+            form.addRow(label, w)
+        self.on_engine()
+
+        self.hint = QLabel("Tipp: Erst mit 5-10 s Länge testen. Die KI braucht auf der CPU Sekunden pro Frame.")
+        self.hint.setWordWrap(True)
+        self.bar = QProgressBar()
+        self.logbox = QPlainTextEdit()
+        self.logbox.setReadOnly(True)
+        self.btn_run = QPushButton("Verarbeiten …")
+        self.btn_run.clicked.connect(self.run)
+        self.btn_cancel = QPushButton("Abbrechen")
+        self.btn_cancel.setEnabled(False)
+        self.btn_cancel.clicked.connect(self.cancel.set)
+        btns = QHBoxLayout()
+        btns.addWidget(self.btn_run)
+        btns.addWidget(self.btn_cancel)
+
+        lay = QVBoxLayout(self)
+        lay.addLayout(form)
+        lay.addWidget(self.hint)
+        lay.addLayout(btns)
+        lay.addWidget(self.bar)
+        lay.addWidget(self.logbox, 1)
+
+    @staticmethod
+    def _slider(v: int) -> QSlider:
+        s = QSlider(Qt.Horizontal)
+        s.setRange(0, 100)
+        s.setValue(v)
+        return s
+
+    def on_engine(self):
+        self.upscale.clear()
+        self.upscale.addItems(["2x", "4x"] if self.engine.currentIndex() == 1 else ["1x", "1.5x", "2x", "3x", "4x"])
+        self.upscale.setCurrentText("2x")
+
+    def pick_src(self):
+        fn, _ = QFileDialog.getOpenFileName(self, "Video öffnen", "", "Videos (*.mp4 *.mov *.m4v *.mkv *.avi *.mts *.m2ts *.webm *.mxf)")
+        if fn:
+            self.src.setText(fn)
+
+    def run(self):
+        from . import video as V
+
+        src = Path(self.src.text().strip())
+        if not src.is_file():
+            return QMessageBox.information(self, "Video-Modul", "Bitte zuerst ein Video wählen.")
+        dst, _ = QFileDialog.getSaveFileName(self, "Speichern als", str(src.with_name(src.stem + "_jzo.mp4")), "MP4 (*.mp4)")
+        if not dst:
+            return
+        fps_txt = self.fps.currentText()
+        s = V.VideoSettings(
+            engine="ki" if self.engine.currentIndex() == 1 else "fast",
+            upscale=float(self.upscale.currentText().rstrip("x")),
+            denoise=self.denoise.value() / 100, sharpen=self.sharpen.value() / 100,
+            stabilize=self.stabilize.isChecked(),
+            fps=None if fps_txt == "wie Original" else float(fps_txt),
+            interp="blend" if self.interp.currentIndex() == 1 else "mci",
+            codec=self.codec.currentText(), start=self.start.value(),
+            seconds=self.seconds.value() or None)
+        self.cancel.clear()
+        self.btn_run.setEnabled(False)
+        self.btn_cancel.setEnabled(True)
+        cancel = self.cancel
+
+        def job(progress, log):
+            return str(V.process_video(src, dst, s, progress=progress, log=log, cancel=cancel))
+
+        self.worker = Worker(job)
+        self.worker.progress.connect(lambda f, t: (self.bar.setValue(int(f * 100)), self.bar.setFormat(f"{t} %p%")))
+        self.worker.log.connect(self.logbox.appendPlainText)
+        self.worker.done.connect(lambda d: (self._finish(), self.logbox.appendPlainText(f"Gespeichert: {d}")))
+        self.worker.failed.connect(lambda m: (self._finish(), self.logbox.appendPlainText(f"FEHLER: {m}")))
+        self.worker.start()
+
+    def _finish(self):
+        self.btn_run.setEnabled(True)
+        self.btn_cancel.setEnabled(False)
+
+
 class Main(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -185,6 +312,9 @@ class Main(QMainWindow):
         row.addWidget(b_open)
         row.addWidget(b_folder)
         form.addLayout(row)
+        b_video = QPushButton("Video-Modul …")
+        b_video.clicked.connect(lambda: VideoDialog(self).show())
+        form.addWidget(b_video)
 
         self.preset = QComboBox()
         self.preset.addItems(["(manuell)"] + list(PRESETS))

@@ -56,6 +56,26 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--format", choices=["tif", "png", "jpg"], default="tif")
     o.add_argument("--jpeg-quality", type=int, default=95)
     o.add_argument("--8bit", dest="eight", action="store_true", help="TIFF/PNG mit 8 statt 16 Bit")
+
+    v = sub.add_parser("video", help="Video(s) verarbeiten: Upscaling, Entrauschen, Stabilisieren, Bildrate")
+    v.add_argument("input", type=Path, help="Datei oder Ordner")
+    v.add_argument("-o", "--output", type=Path, help="Zieldatei bzw. Zielordner")
+    v.add_argument("--engine", choices=["fast", "ki"], default="fast",
+                   help="fast = ffmpeg-Filter (schnell), ki = Real-ESRGAN pro Frame (sehr langsam auf CPU)")
+    v.add_argument("--upscale", type=float, default=2.0, help="Faktor (fast: beliebig, ki: 2 oder 4)")
+    v.add_argument("--quality", choices=["fast", "best"], default="fast", help="KI-Modell (nur --engine ki)")
+    v.add_argument("--denoise", type=float, default=0.4, help="0..1")
+    v.add_argument("--sharpen", type=float, default=0.3, help="0..1")
+    v.add_argument("--stabilize", action="store_true", help="Verwacklungen glätten")
+    v.add_argument("--smoothing", type=int, default=15, help="Stabilisierung: Glättung in Frames")
+    v.add_argument("--fps", type=float, help="Ziel-Bildrate, z. B. 60 (berechnet Zwischenbilder)")
+    v.add_argument("--interp", choices=["mci", "blend"], default="mci",
+                   help="mci = bewegungsbasiert (besser, langsam), blend = Überblendung (schnell)")
+    v.add_argument("--codec", choices=["x264", "x265", "videotoolbox"], default="x264")
+    v.add_argument("--crf", type=int, default=16, help="Qualität, kleiner = besser/größer")
+    v.add_argument("--start", type=float, default=0.0, help="Startzeit in Sekunden")
+    v.add_argument("--seconds", type=float, help="Nur diese Länge verarbeiten (zum Testen empfohlen)")
+    v.add_argument("--tile", type=int, help="Kachelgröße für KI (kleiner = weniger Speicher)")
     return p
 
 
@@ -133,6 +153,46 @@ def cmd_photo(a) -> int:
     return 0
 
 
+def cmd_video(a) -> int:
+    from . import video as V
+
+    try:
+        V.require_ffmpeg()
+    except V.VideoError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    s = V.VideoSettings(
+        engine=a.engine, upscale=a.upscale, upscale_model="x4plus" if a.quality == "best" else "general",
+        denoise=a.denoise, sharpen=a.sharpen, stabilize=a.stabilize, stabilize_smoothing=a.smoothing,
+        fps=a.fps, interp=a.interp, codec=a.codec, crf=a.crf, start=a.start, seconds=a.seconds, tile=a.tile)
+    files = sorted(p for p in a.input.iterdir() if p.is_file() and V.is_video(p)) if a.input.is_dir() else [a.input]
+    if not files:
+        print("Keine Videodateien gefunden.", file=sys.stderr)
+        return 1
+    code = 0
+    for i, src in enumerate(files, 1):
+        if a.output and len(files) == 1 and a.output.suffix:
+            dst = a.output
+        else:
+            dst = (a.output or src.parent / "jzoai_out") / (src.stem + "_jzo.mp4")
+        last = {"t": 0.0}
+
+        def cb(frac: float, text: str, _i=i, _n=src.name):
+            now = time.time()
+            if now - last["t"] > 1.0 or frac >= 1.0:
+                last["t"] = now
+                print(f"\r[{_i}/{len(files)}] {_n}: {text} {frac * 100:3.0f}%      ", end="", flush=True)
+
+        t0 = time.time()
+        try:
+            V.process_video(src, dst, s, progress=cb, log=lambda m: print(f"\n{m}"))
+            print(f"\r[{i}/{len(files)}] {src.name} -> {dst}  ({time.time() - t0:.0f} s)              ")
+        except V.VideoError as exc:
+            print(f"\n[{i}/{len(files)}] {src.name}: FEHLER: {exc}", file=sys.stderr)
+            code = 1
+    return code
+
+
 def cmd_models(a) -> int:
     names = a.names or ["general", "scunet"]
     for n in names:
@@ -154,6 +214,9 @@ def cmd_doctor(_a) -> int:
         except Exception:
             opt = " (optional)" if mod == "lensfunpy" else ""
             print(f"  fehlt   {mod}{opt}")
+    from . import video as V
+    for tool in ("ffmpeg", "ffprobe"):
+        print(f"  {'ok     ' if V.find_tool(tool) else 'fehlt  '} {tool}" + ("" if V.find_tool(tool) else "  (brew install ffmpeg, nur für Video nötig)"))
     for k, v in models.REGISTRY.items():
         print(f"  Modell  {k:8s} {'vorhanden' if models.is_downloaded(k) else 'noch nicht geladen'}  - {v['desc']}")
     return 0
@@ -161,7 +224,7 @@ def cmd_doctor(_a) -> int:
 
 def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
-    return {"photo": cmd_photo, "models": cmd_models, "doctor": cmd_doctor}[a.cmd](a)
+    return {"photo": cmd_photo, "video": cmd_video, "models": cmd_models, "doctor": cmd_doctor}[a.cmd](a)
 
 
 if __name__ == "__main__":
