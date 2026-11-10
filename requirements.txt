@@ -1,0 +1,12 @@
+# Für Intel-Macs (x86_64): PyTorch wird dort nur bis 2.2.2 gebaut -> Python 3.11 verwenden,
+# numpy muss unter 2 bleiben.
+numpy>=1.26,<2
+opencv-python>=4.9,<4.11
+rawpy>=0.21
+torch==2.2.2
+torchvision==0.17.2
+spandrel>=0.4,<0.5
+PySide6>=6.6
+tqdm>=4.66
+# Optional (Objektivkorrektur per lensfun-Datenbank):
+# lensfunpy>=1.15
