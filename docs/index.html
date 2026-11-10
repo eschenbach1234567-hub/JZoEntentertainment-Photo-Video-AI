@@ -6,6 +6,20 @@
 <title>JZo Entertainment Foto Video AI</title>
 <meta name="description" content="Fotos und Videos im Browser verbessern: Entrauschen, Schärfen, KI-Upscaling und ein Vogel-Modus.">
 <meta name="theme-color" content="#0f1216">
+<script>
+/* Einmaliger Neustart der Seite, damit der Service Worker die Mehrkern-Berechnung freischalten kann. Schlägt etwas fehl, läuft alles wie bisher einkernig. */
+(function () {
+  try {
+    if (window.crossOriginIsolated || /[?&]nocoi=1/.test(location.search) || !('serviceWorker' in navigator) || !location.protocol.startsWith('http')) return;
+    if (sessionStorage.getItem('jzo.coi') === '1' || localStorage.getItem('jzo.nocoi') === '1') return;
+    navigator.serviceWorker.register('sw.js').then(function (reg) {
+      var go = function () { sessionStorage.setItem('jzo.coi', '1'); location.reload(); };
+      if (navigator.serviceWorker.controller) return go();
+      navigator.serviceWorker.addEventListener('controllerchange', go);
+    }).catch(function () {});
+  } catch (e) {}
+})();
+</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">

@@ -8,7 +8,7 @@ http.createServer((req, res) => {
     if (url.startsWith(p + '/')) {
       const f = path.join(dir, url.slice(p.length));
       if (f.startsWith(dir) && fs.existsSync(f) && fs.statSync(f).isFile()) {
-        res.writeHead(200, { 'Content-Type': types[path.extname(f)] || 'application/octet-stream' });
+        res.writeHead(200, { 'Content-Type': types[path.extname(f)] || 'application/octet-stream', 'Cross-Origin-Resource-Policy': 'cross-origin', 'Access-Control-Allow-Origin': '*' });   // wie jsDelivr
         return fs.createReadStream(f).pipe(res);
       }
     }

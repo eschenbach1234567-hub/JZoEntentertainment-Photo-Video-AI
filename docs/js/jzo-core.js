@@ -602,7 +602,9 @@
     const denoised = cur;
 
     // 3) Upscaling
-    let up = await JZO.upscale(cur, scale, useAI ? { session: ctx.session, tile: ctx.upTile || 192, signal: ctx.signal } : null, prog(0.5, 0.8, 'Vergrößern'));
+    let up = await JZO.upscale(cur, scale, useAI ? { session: ctx.session, tile: ctx.upTile || 256, signal: ctx.signal } : null, prog(0.5, 0.8, 'Vergrößern'));
+
+    const upPre = up;   // vor dem Schärfen: Grundlage für den Vogel-Pass (spart eine zweite KI-Vergrößerung)
 
     // 4) Schärfen (Hintergrund etwas weniger)
     if (S.sharpen > 0.01) {
@@ -636,7 +638,12 @@
       for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) maskReg[(y + y0 - ry0) * rw + (x + x0 - rx0)] = b.mask[y * bw + x];
       const need = Math.ceil((S.birdTarget || 1200) / Math.max(size, 1));
       const f = Math.min(4, Math.max(scale, need));
-      const cropUp = await JZO.upscale(crop, f, useAI ? { session: ctx.session, tile: ctx.upTile || 192, signal: ctx.signal } : null, prog(0.88 + 0.09 * bi / birds.length, 0.88 + 0.09 * (bi + 1) / birds.length, 'Vogel ' + (bi + 1) + '/' + birds.length));
+      let cropUp;
+      if (scale > 1 || f === 1) {
+        // Das Foto wurde schon vergrößert: Vogel-Ausschnitt dort herausnehmen, nur ggf. noch klassisch weiter vergrößern
+        const base = JZO.cropImg(upPre, rx0 * scale, ry0 * scale, rw * scale, rh * scale);
+        cropUp = f === scale ? base : JZO.resizeImg(base, Math.round(rw * f), Math.round(rh * f));
+      } else cropUp = await JZO.upscale(crop, f, useAI ? { session: ctx.session, tile: ctx.upTile || 256, signal: ctx.signal } : null, prog(0.88 + 0.09 * bi / birds.length, 0.88 + 0.09 * (bi + 1) / birds.length, 'Vogel ' + (bi + 1) + '/' + birds.length));
       const mUp = resizeF(maskReg, rw, rh, cropUp.w, cropUp.h, 1);
       const soft = featherMask(mUp, cropUp.w, cropUp.h, size * f);
       const regUp = { w: cropUp.w, h: cropUp.h, d: cropF(cropUp, 0, 0, cropUp.w, cropUp.h) };

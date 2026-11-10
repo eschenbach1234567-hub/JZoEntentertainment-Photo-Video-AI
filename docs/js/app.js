@@ -42,7 +42,7 @@
       setStatus('Lade KI-Laufzeit …');
       await loadScript(LIBS.ort);
       ort.env.wasm.wasmPaths = LIBS.ortBase;
-      ort.env.wasm.numThreads = 1;
+      ort.env.wasm.numThreads = window.crossOriginIsolated ? Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 8)) : 1;   // Mehrkern nur mit Cross-Origin-Isolation
       if (window.cv) JZO.setLibs({ cv: window.cv, ort });
     })();
     return state.ortReady;
@@ -329,7 +329,7 @@
     const t0 = performance.now();
     try {
       await ensureCV(); await ensureORT();
-      const ctx = { signal: state.abort.signal, onProgress, log, tile: 512, upTile: 192 };
+      const ctx = { signal: state.abort.signal, onProgress, log, tile: 512, upTile: 256 };
       if (S.ai && S.scale > 1) ctx.session = await getSession('esrgan', 'KI-Vergrößerung', [1, 3, 16, 16]);
       if (S.birds && !S.birdBoxes.length) ctx.detector = await getSession('yolox', 'Vogelerkennung', [1, 3, 640, 640]);
       setStatus(preview ? 'Rechne Vorschau …' : 'Rechne …');
@@ -491,5 +491,15 @@
   buildControls();
   writeSettings(state.defaults);
   $('birdTarget').value = '1200';
-  ensureCV().then(() => setStatus('')).catch((e) => setStatus('Bibliothek konnte nicht geladen werden (Internet?): ' + e.message, 'err'));
+  // Notbremse: Falls im Mehrkern-Modus ein Baustein nicht lädt, Mehrkern dauerhaft abschalten und einmal neu starten
+  function disableIsolation() {
+    try { localStorage.setItem('jzo.nocoi', '1'); } catch (e) { /* egal */ }
+    const done = () => { sessionStorage.setItem('jzo.coi', '1'); location.reload(); };
+    if (navigator.serviceWorker) navigator.serviceWorker.getRegistrations().then((rs) => Promise.all(rs.map((r) => r.unregister()))).then(done, done); else done();
+  }
+  window.JZO_disableIsolation = disableIsolation;
+  ensureCV().then(() => setStatus('')).catch((e) => {
+    if (window.crossOriginIsolated && !sessionStorage.getItem('jzo.fallback')) { sessionStorage.setItem('jzo.fallback', '1'); disableIsolation(); return; }
+    setStatus('Bibliothek konnte nicht geladen werden (Internet?): ' + e.message, 'err');
+  });
 })();

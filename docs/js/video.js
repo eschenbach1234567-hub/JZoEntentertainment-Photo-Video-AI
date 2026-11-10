@@ -4,11 +4,12 @@
   const { $, params, wireDrop, saveFile } = window.JZO_UI;
   const VF = window.JZOVF;
   const FF_CORE = params.get('libs') ? params.get('libs') + '/ffcore/' : 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/';   // 31 MB, aus dem Netz
+  const FF_CORE_MT = params.get('libs') ? params.get('libs') + '/ffcoremt/' : 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-mt@0.12.10/dist/esm/';   // Mehrkern-Variante
   const MAX_BYTES = 1.4e9;
   const maxSeconds = () => Math.max(60, (+$('v-maxMin').value || 20) * 60);
   try { const m = localStorage.getItem('jzo.maxMin'); if (m) $('v-maxMin').value = m; } catch (e) { /* ohne Speicher */ }
 
-  let file = null, ffmpeg = null, loading = null, srcUrl = null, vmeta = null, running = false, cancelled = false, result = null, logSink = null;
+  let mode = '', file = null, ffmpeg = null, loading = null, srcUrl = null, vmeta = null, running = false, cancelled = false, result = null, logSink = null;
 
   const setStatus = (t, c) => { const s = $('vstatus'); s.textContent = t || ''; s.className = 'status' + (c ? ' ' + c : ''); };
 
@@ -77,9 +78,20 @@
       setStatus('Lade Video-Baustein (ca. 30 MB, nur beim ersten Mal) …');
       const { FFmpeg } = await import(new URL('lib/ffmpeg/index.js', location.href).href);
       const toBlobURL = async (u, type) => URL.createObjectURL(new Blob([await (await fetch(u)).arrayBuffer()], { type }));
-      const f = new FFmpeg();
-      f.on('log', ({ message }) => { if (logSink) logSink(message); if (params.get('debug')) console.log(message); });
-      await f.load({ coreURL: await toBlobURL(FF_CORE + 'ffmpeg-core.js', 'text/javascript'), wasmURL: await toBlobURL(FF_CORE + 'ffmpeg-core.wasm', 'application/wasm') });
+      const makeLoad = async (multi) => {
+        const f = new FFmpeg();
+        f.on('log', ({ message }) => { if (logSink) logSink(message); if (params.get('debug')) console.log(message); });
+        const base = multi ? FF_CORE_MT : FF_CORE;
+        const cfg = { coreURL: await toBlobURL(base + 'ffmpeg-core.js', 'text/javascript'), wasmURL: await toBlobURL(base + 'ffmpeg-core.wasm', 'application/wasm') };
+        if (multi) cfg.workerURL = await toBlobURL(base + 'ffmpeg-core.worker.js', 'text/javascript');
+        await f.load(cfg);
+        return f;
+      };
+      let f;
+      if (window.crossOriginIsolated && params.get('mt') === '1') {   // Mehrkern-FFmpeg ist noch unzuverlässig: nur auf Wunsch (?mt=1)
+        try { f = await makeLoad(true); mode = 'multi'; } catch (e) { console.warn('Mehrkern-FFmpeg nicht verfügbar, nutze Einkern', e); f = null; }
+      }
+      if (!f) { f = await makeLoad(false); mode = 'single'; }
       ffmpeg = f; return f;
     })().finally(() => { loading = null; });
     return loading;
@@ -217,5 +229,5 @@
   };
 
   writeSettings(Object.assign({}, VF.defaults(), PRESETS.standard));
-  window.JZO_VIDEO = { loadVideo, run, readSettings, writeSettings };
+  window.JZO_VIDEO = { loadVideo, run, readSettings, writeSettings, mode: () => mode };
 })();

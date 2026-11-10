@@ -12,7 +12,9 @@ const ok = (c, msg) => { console.log((c ? 'OK     ' : 'FEHLER ') + msg); if (!c)
   const errs = [];
   p.on('pageerror', (e) => { errs.push(e.message); console.log('[pageerror]', e.message); });
   p.on('console', (m) => { if (m.type() === 'error' && !/404/.test(m.text())) console.log('[console.error]', m.text()); });
-  await p.goto('http://localhost:8765/docs/index.html?libs=/libs&gpu=0', { waitUntil: 'load' });
+  await p.goto('http://localhost:8765/docs/index.html?libs=http://localhost:8766/libs&gpu=0', { waitUntil: 'load' });
+  for (let i = 0; i < 30; i++) { await new Promise((r) => setTimeout(r, 500)); try { if (await p.evaluate(() => window.crossOriginIsolated)) break; } catch (e) { /* Seite lädt neu */ } }
+  ok(await p.evaluate(() => window.crossOriginIsolated), 'Seite ist Cross-Origin-isoliert (Mehrkern)');
   const waitText = (sel, re, t = 300000) => p.waitForFunction((s, r) => new RegExp(r).test(document.querySelector(s).textContent), { timeout: t }, sel, re.source);
   const val = (sel) => p.$eval(sel, (e) => e.value);
   const setRange = (id, v) => p.evaluate((i, x) => { const e = document.getElementById(i); e.value = x; e.dispatchEvent(new Event('input', { bubbles: true })); }, id, v);
@@ -66,6 +68,7 @@ const ok = (c, msg) => { console.log((c ? 'OK     ' : 'FEHLER ') + msg); if (!c)
   await p.evaluate(() => { const l = document.getElementById('v-len'); l.value = 1; l.dispatchEvent(new Event('change', { bubbles: true })); });
   await p.click('#vrun'); await waitText('#vstatus', /Fertig|Fehler|Abgebrochen/);
   let vs = await p.$eval('#vstatus', (e) => e.textContent); let vd = await p.evaluate(() => window.__videoDone);
+  console.log('FFmpeg-Modus:', await p.evaluate(() => window.JZO_VIDEO.mode && window.JZO_VIDEO.mode()));
   console.log('Video 1:', vs, JSON.stringify(vd)); ok(/Fertig/.test(vs) && vd.w === 640, 'Video einzeln verarbeitet (2×)');
   // Stückweise (3 Stücke à 1 s) mit Ton + Zeitlupe-Preset-Teile
   await p.evaluate(() => { const l = document.getElementById('v-len'); l.value = 0; l.dispatchEvent(new Event('change', { bubbles: true })); document.getElementById('v-segLen').value = '1'; });
