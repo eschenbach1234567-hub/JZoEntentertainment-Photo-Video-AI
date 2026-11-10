@@ -38,16 +38,21 @@
         <div class="viewbar">
           <span id="fileinfo"></span>
           <span class="spacer"></span>
-          <button id="btn-zoom" class="btn small">Lupe 100 %</button>
+          <button id="z-fit" class="btn small" title="Ganzes Bild anzeigen">Einpassen</button>
+          <button id="z-100" class="btn small" title="Pixelgenau (100 %)">100 %</button>
+          <button id="z-out" class="btn small" title="Verkleinern">−</button>
+          <button id="z-in" class="btn small" title="Vergrößern">+</button>
+          <output id="z-label" class="zlabel">100 %</output>
           <button id="btn-back" class="btn small hidden">Zurück zum Original</button>
           <label class="btn small">Anderes Foto<input id="file2" type="file" accept="image/*" hidden></label>
         </div>
-        <div id="scroller" class="scroller">
+        <div id="viewport" class="viewport">
           <div id="stage" class="stage">
             <canvas id="c-before"></canvas>
             <canvas id="c-after" class="hidden"></canvas>
             <canvas id="c-over"></canvas>
           </div>
+          <div id="vp-hint" class="vp-hint">Ziehen = verschieben · Mausrad/Zwei-Finger-Pinch = zoomen · Doppelklick = Einpassen/100 %</div>
         </div>
         <div id="cmp" class="cmp hidden"><span>Vorher</span><input id="cmp-range" type="range" min="0" max="100" value="50"><span>Nachher</span></div>
         <p id="markhint" class="hint hidden">Vogel markieren: Rahmen mit der Maus aufziehen. Mehrere Vögel sind möglich.</p>
@@ -56,22 +61,23 @@
 
     <aside class="side">
       <h2>Einstellungen</h2>
+      <div class="row autopilot">
+        <button id="btn-auto" class="btn small" disabled>Autopilot</button>
+        <span id="autoinfo" class="hint">Analysiert das Foto und schlägt Werte vor.</span>
+      </div>
       <div class="field">
         <label for="preset">Voreinstellung</label>
         <select id="preset">
           <option value="standard">Standard</option>
+          <option value="neutral">Neutral (alles aus)</option>
           <option value="hohe-iso">Hohe ISO / verrauscht</option>
+          <option value="natur-kraeftig">Natur kräftig</option>
           <option value="voegel">Vogelfoto</option>
           <option value="voegel-klein">Vogelfoto – kleine Vögel</option>
         </select>
       </div>
-      <div class="field"><label>Entrauschen <output id="o-denoise"></output></label><input id="denoise" type="range" min="0" max="1" step="0.05"></div>
-      <div class="field"><label>Schärfen <output id="o-sharpen"></output></label><input id="sharpen" type="range" min="0" max="1" step="0.05"></div>
-      <div class="field">
-        <label for="scale">Vergrößern</label>
-        <select id="scale"><option value="1">Original (1×)</option><option value="2">2×</option><option value="4">4×</option></select>
-      </div>
-      <div class="field check"><label><input id="ai" type="checkbox" checked> KI-Vergrößerung (Real-ESRGAN)</label><small>Aus = schneller, klassische Vergrößerung.</small></div>
+
+      <div id="controls"></div>
 
       <details id="birdbox" class="bird">
         <summary><label class="check"><input id="birds" type="checkbox"> <strong>Vogel-Modus</strong></label></summary>
@@ -90,6 +96,7 @@
         </div>
         <p id="markcount" class="hint"></p>
       </details>
+      <button id="btn-reset" class="btn small linkish">Alle Regler zurücksetzen</button>
 
       <div class="row actions">
         <button id="btn-preview" class="btn" disabled>Vorschau (Ausschnitt)</button>
@@ -99,15 +106,21 @@
         <div class="bar"><div id="bar-fill"></div></div>
         <div class="row"><span id="ptext">…</span><span class="spacer"></span><button id="btn-cancel" class="btn small">Abbrechen</button></div>
       </div>
+      <div id="status" class="status"></div>
+
       <div id="result" class="result hidden">
-        <h3>Ergebnis</h3>
-        <div class="row">
-          <button id="dl-png" class="btn primary">PNG laden</button>
-          <button id="dl-jpg" class="btn">JPG laden</button>
+        <h3>Export</h3>
+        <div class="field"><label for="exFormat">Format</label>
+          <select id="exFormat"><option value="image/jpeg">JPG</option><option value="image/png">PNG (verlustfrei)</option><option value="image/webp">WebP</option></select></div>
+        <div class="field" id="exQualRow"><label>Qualität <output id="o-exQuality">92</output></label><input id="exQuality" type="range" min="50" max="100" step="1" value="92"></div>
+        <div class="field"><label>Größen (mehrere möglich)</label>
+          <div id="exSizes" class="sizes"></div>
+          <div class="row"><label class="check"><input id="exCustomOn" type="checkbox"> Eigene Größe:</label><input id="exCustom" type="number" min="64" max="20000" step="10" value="3000" class="num narrow"><small>px lange Kante</small></div>
         </div>
+        <div class="row"><button id="btn-export" class="btn primary" style="flex:1">Exportieren</button></div>
+        <small id="exinfo" class="hint"></small>
         <div id="crops" class="crops"></div>
       </div>
-      <div id="status" class="status"></div>
       <pre id="log" class="log hidden"></pre>
     </aside>
   </div>
@@ -120,34 +133,104 @@
       <div id="vdrop" class="drop">
         <div class="drop-inner">
           <strong>Video hierher ziehen</strong><span>oder</span>
-          <label class="btn primary">Video auswählen<input id="vfile" type="file" accept="video/*" hidden></label>
-          <small>Am besten kurze Clips (bis ca. 30 Sekunden, bis 1080p). Das Video wird im Browser verarbeitet – das braucht Zeit und Arbeitsspeicher.</small>
+          <label class="btn primary">Video auswählen<input id="vfile" type="file" accept="video/*,.mov,.mp4,.mkv,.m4v,.avi,.mts" hidden></label>
+          <small>Standardmäßig bis 20 Minuten pro Durchgang (Limit einstellbar). Das Video wird im Browser in Stücken gerechnet – das dauert, vor allem bei hoher Auflösung. Browserfenster dabei offen lassen.</small>
         </div>
       </div>
       <div id="vviewer" class="viewer hidden">
-        <div class="viewbar"><span id="vinfo"></span><span class="spacer"></span><label class="btn small">Anderes Video<input id="vfile2" type="file" accept="video/*" hidden></label></div>
+        <div class="viewbar"><span id="vinfo"></span><span class="spacer"></span><label class="btn small">Anderes Video<input id="vfile2" type="file" accept="video/*,.mov,.mp4,.mkv,.m4v,.avi,.mts" hidden></label></div>
         <video id="vplayer" controls playsinline></video>
-        <div id="vresultbox" class="hidden"><h3>Ergebnis</h3><video id="vout" controls playsinline></video><div class="row"><a id="vdl" class="btn primary" download="video_jzo.mp4">Video laden</a></div></div>
+        <p id="vestimate" class="hint"></p>
+        <div id="vresultbox" class="hidden">
+          <h3>Ergebnis</h3>
+          <video id="vout" controls playsinline></video>
+          <div class="row"><button id="vsave" class="btn primary">Video speichern</button><button id="vframe" class="btn">Standbild (PNG) speichern</button><span id="vsaveinfo" class="hint"></span></div>
+        </div>
       </div>
     </div>
     <aside class="side">
       <h2>Video-Einstellungen</h2>
-      <div class="field"><label for="vscale">Vergrößern</label>
-        <select id="vscale"><option value="1">Original</option><option value="1.5">1,5×</option><option value="2" selected>2×</option><option value="3">3×</option></select></div>
-      <div class="field"><label>Entrauschen <output id="o-vdenoise"></output></label><input id="vdenoise" type="range" min="0" max="1" step="0.05" value="0.4"></div>
-      <div class="field"><label>Schärfen <output id="o-vsharpen"></output></label><input id="vsharpen" type="range" min="0" max="1" step="0.05" value="0.3"></div>
-      <div class="field check"><label><input id="vstab" type="checkbox"> Verwacklungen glätten</label></div>
-      <div class="field"><label for="vfps">Bildrate</label>
-        <select id="vfps"><option value="0">Original</option><option value="30">30 fps</option><option value="48">48 fps</option><option value="60">60 fps</option></select>
-        <small>Höhere Bildrate berechnet Zwischenbilder – sehr rechenintensiv.</small></div>
-      <div class="field"><label for="vinterp">Zwischenbilder</label>
-        <select id="vinterp"><option value="blend">Überblenden (schnell)</option><option value="mci">Bewegungsbasiert (sehr langsam)</option></select></div>
-      <div class="field"><label>Ausschnitt: Start (Sek.) <input id="vstart" type="number" min="0" step="0.5" value="0" class="num"></label></div>
-      <div class="field"><label>Länge (Sek., 0 = bis Ende) <input id="vlen" type="number" min="0" step="0.5" value="10" class="num"></label></div>
-      <div class="row actions"><button id="vrun" class="btn primary" disabled>Video verarbeiten</button></div>
+      <div class="field"><label for="vpreset">Voreinstellung</label>
+        <select id="vpreset">
+          <option value="standard">Standard (Vergrößern 1080p)</option>
+          <option value="clean">Sauber (Entrauschen + Schärfen)</option>
+          <option value="neutral">Nur umwandeln</option>
+          <option value="slow">Zeitlupe ×0,5 (60 fps)</option>
+          <option value="shaky">Wackelig (stabilisieren)</option>
+        </select></div>
+
+      <details class="grp" open><summary>Ausgabe-Auflösung</summary>
+        <div class="field"><label for="v-res">Auflösung</label>
+          <select id="v-res"><option value="orig">Original</option><option value="720">720p (HD)</option><option value="1080">1080p (Full HD)</option><option value="1440">1440p (2K)</option><option value="2160">2160p (4K)</option><option value="x2">2× vergrößern</option><option value="x3">3× vergrößern</option><option value="x4">4× vergrößern</option></select></div>
+        <div class="field"><label for="v-scaler">Vergrößerungsverfahren</label>
+          <select id="v-scaler"><option value="lanczos">Lanczos (scharf)</option><option value="bicubic">Bicubic (weicher)</option><option value="spline">Spline (sehr scharf)</option></select></div>
+      </details>
+
+      <details class="grp" open><summary>Verbessern</summary>
+        <div class="field"><label>Entrauschen <output id="o-v-denoise"></output></label><input type="range" id="v-denoise" min="0" max="1" step="0.05"></div>
+        <div class="field"><label for="v-dnMode">Entrausch-Verfahren</label>
+          <select id="v-dnMode"><option value="fast">Schnell (räumlich)</option><option value="temporal">Zeitlich (gut bei ruhigen Szenen)</option><option value="both">Beides (stärker, langsamer)</option></select></div>
+        <div class="field"><label>Schärfen <output id="o-v-sharpen"></output></label><input type="range" id="v-sharpen" min="0" max="1" step="0.05"></div>
+        <div class="field"><label for="v-shSize">Schärfe-Radius</label>
+          <select id="v-shSize"><option value="3">Fein</option><option value="5" selected>Mittel</option><option value="7">Grob</option></select></div>
+        <div class="field"><label>Details wiederherstellen <output id="o-v-detail"></output></label><input type="range" id="v-detail" min="0" max="1" step="0.05"></div>
+        <div class="field check"><label><input type="checkbox" id="v-deint"> Zeilensprung entfernen (Deinterlace)</label></div>
+        <div class="field"><label>Körnung <output id="o-v-grain"></output></label><input type="range" id="v-grain" min="0" max="1" step="0.05"></div>
+      </details>
+
+      <details class="grp"><summary>Stabilisieren</summary>
+        <div class="field"><label for="v-stab">Verwacklungen glätten</label>
+          <select id="v-stab"><option value="0">Aus</option><option value="16">Leicht</option><option value="32">Mittel</option><option value="48">Stark</option></select>
+          <small>Ränder werden gespiegelt aufgefüllt.</small></div>
+      </details>
+
+      <details class="grp"><summary>Bildrate und Zeitlupe</summary>
+        <div class="field"><label for="v-fps">Ziel-Bildrate</label>
+          <select id="v-fps"><option value="0">Original</option><option value="24">24 fps</option><option value="25">25 fps</option><option value="30">30 fps</option><option value="48">48 fps</option><option value="50">50 fps</option><option value="60">60 fps</option><option value="120">120 fps</option></select></div>
+        <div class="field"><label for="v-interp">Zwischenbilder</label>
+          <select id="v-interp"><option value="blend">Überblenden (schnell)</option><option value="mci">Bewegungsbasiert (sehr langsam, schöner)</option></select></div>
+        <div class="field"><label for="v-speed">Tempo</label>
+          <select id="v-speed"><option value="0.25">Zeitlupe ×0,25</option><option value="0.5">Zeitlupe ×0,5</option><option value="1" selected>Normal</option><option value="2">Zeitraffer ×2</option><option value="4">Zeitraffer ×4</option></select></div>
+      </details>
+
+      <details class="grp"><summary>Farbe</summary>
+        <div class="field"><label>Helligkeit <output id="o-v-bright"></output></label><input type="range" id="v-bright" min="-1" max="1" step="0.05"></div>
+        <div class="field"><label>Kontrast <output id="o-v-contrast"></output></label><input type="range" id="v-contrast" min="-1" max="1" step="0.05"></div>
+        <div class="field"><label>Sättigung <output id="o-v-sat"></output></label><input type="range" id="v-sat" min="-1" max="1" step="0.05"></div>
+        <div class="field"><label>Wärme (kühl ↔ warm) <output id="o-v-warm"></output></label><input type="range" id="v-warm" min="-1" max="1" step="0.05"></div>
+      </details>
+
+      <details class="grp"><summary>Bild</summary>
+        <div class="field"><label for="v-rot">Drehen / Spiegeln</label>
+          <select id="v-rot"><option value="none">Keine</option><option value="cw">90° rechts</option><option value="ccw">90° links</option><option value="180">180°</option><option value="flip">Horizontal spiegeln</option></select></div>
+        <div class="field"><label for="v-crop">Zuschneiden (Mitte)</label>
+          <select id="v-crop"><option value="orig">Original-Format</option><option value="16:9">16:9</option><option value="9:16">9:16 (hochkant)</option><option value="1:1">1:1 (quadratisch)</option><option value="4:5">4:5</option><option value="4:3">4:3</option><option value="21:9">21:9 (Kino)</option></select></div>
+      </details>
+
+      <details class="grp" open><summary>Ausschnitt</summary>
+        <div class="field"><label>Start (Sekunden) <input id="v-start" type="number" min="0" step="0.5" value="0" class="num"></label></div>
+        <div class="field"><label>Länge (Sekunden, 0 = bis Ende) <input id="v-len" type="number" min="0" step="1" value="0" class="num"></label></div>
+        <div class="field"><label>Clip-Limit (Minuten) <input id="v-maxMin" type="number" min="1" max="600" step="1" value="20" class="num"></label><small>Obergrenze für die Länge pro Durchgang. Standard 20 – du kannst sie beliebig anheben oder senken (sehr lange Videos brauchen sehr lange).</small></div>
+      </details>
+
+      <details class="grp" open><summary>Export</summary>
+        <div class="field"><label for="v-codec">Codec</label>
+          <select id="v-codec"><option value="h264">H.264 (läuft überall)</option><option value="prores">ProRes 422 HQ (Schnitt, riesig)</option></select></div>
+        <div class="field"><label for="v-format">Container</label>
+          <select id="v-format"><option value="mp4">MP4</option><option value="mov">MOV</option><option value="mkv">MKV</option></select></div>
+        <div class="field"><label>Qualität <output id="o-v-crf"></output></label><input type="range" id="v-crf" min="12" max="30" step="1"><small>Links = bessere Qualität und größere Datei.</small></div>
+        <div class="field"><label for="v-preset">Rechenzeit</label>
+          <select id="v-preset"><option value="superfast">Schnellste</option><option value="veryfast" selected>Schnell</option><option value="fast">Ausgewogen</option><option value="medium">Langsam (kleinere Datei)</option></select></div>
+        <div class="field"><label for="v-audio">Ton</label>
+          <select id="v-audio"><option value="keep">Behalten (AAC)</option><option value="off">Entfernen</option></select></div>
+        <div class="field"><label for="v-segLen">Stückgröße (Sek.)</label>
+          <select id="v-segLen"><option value="30">30</option><option value="60" selected>60</option><option value="120">120</option></select><small>Lange Videos werden in Stücken gerechnet und am Ende zusammengesetzt.</small></div>
+      </details>
+
+      <div class="row actions"><button id="vpreview" class="btn" disabled>Vorschau (5 s)</button><button id="vrun" class="btn primary" disabled>Video verarbeiten</button></div>
       <div id="vprogress" class="progress hidden"><div class="bar"><div id="vbar"></div></div><div class="row"><span id="vtext">…</span><span class="spacer"></span><button id="vcancel" class="btn small">Abbrechen</button></div></div>
       <div id="vstatus" class="status"></div>
-      <p class="hint">Hinweis: Die Video-Verarbeitung nutzt klassische Filter (Lanczos, Entrauschen, Schärfen). KI-Video-Upscaling gibt es im Browser nicht.</p>
+      <p class="hint">Hinweis: Alles läuft mit klassischen Filtern (Lanczos, Entrauschen, Schärfen …), nicht mit KI. Im Browser rechnet der Prozessor – 1080p ist deutlich langsamer als Echtzeit.</p>
     </aside>
   </div>
 </section>
@@ -181,6 +264,7 @@
 <footer>JZo Entertainment Foto Video AI · Modelle: Real-ESRGAN (BSD-3), YOLOX (Apache-2.0) · OpenCV.js · ONNX Runtime Web · FFmpeg.wasm</footer>
 
 <script src="js/jzo-core.js"></script>
+<script src="js/video-filters.js"></script>
 <script src="js/app.js"></script>
 <script src="js/video.js"></script>
 <script>if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});</script>

@@ -46,6 +46,13 @@ window.runTests = async function(){
   const small = await JZO.mapTiles(n,{tile:160,margin:32,fn:(reg)=>JZO.denoiseRegion(reg,0.6)});
   const big = await JZO.mapTiles(n,{tile:512,margin:32,fn:(reg)=>JZO.denoiseRegion(reg,0.6)});
   out.tile_consistency_psnr = psnr(small,big);
+  // Licht/Farbe: Wirkung prüfen
+  const flat = JZO.newImg(64,64); for (let i=0;i<flat.d.length;i+=3){flat.d[i]=120;flat.d[i+1]=100;flat.d[i+2]=80;}
+  const mean = (im,c)=>{let s=0;for(let i=c;i<im.d.length;i+=3)s+=im.d[i];return s/(im.d.length/3);};
+  const adj = async (A)=>JZO.mapTiles(flat,{tile:512,margin:48,fn:(reg)=>JZO.adjustRegion(reg,Object.assign({},A))});
+  const ex = await adj({exposure:1}), sa = await adj({saturation:-1}), te = await adj({temperature:1}), gr = await adj({grain:1}), ct = await adj({contrast:0.5}), sd = await adj({shadows:1}), cl = await adj({clarity:1});
+  out.adjust = { exposure_R: mean(ex,0), sat0_spread: Math.abs(mean(sa,0)-mean(sa,2)), warm_R_minus_B: mean(te,0)-mean(te,2), grain_changes: psnr(flat,gr), contrast_R: mean(ct,0), shadows_R: mean(sd,0), clarity_flat_unchanged: psnr(flat,cl) };
+  out.analyze_noisy = JZO.analyze(n); out.analyze_clean = JZO.analyze(clean);
   // Lanczos-Upscale ohne KI
   const up = await JZO.upscale(clean,2,null);
   out.up2 = [up.w, up.h];

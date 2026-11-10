@@ -178,8 +178,10 @@
   }
 
   /** Entrauscht eine Kachel: Helligkeit per Pyramiden-Schrumpfung, Farbe per Glättung bei halber Auflösung. */
-  JZO.denoiseRegion = function (reg, s) {
+  JZO.denoiseRegion = function (reg, s, o) {
     if (s <= 0.001) return reg;
+    o = o || {};
+    const cm = o.color === undefined ? 1 : o.color, keep = o.keep || 0;
     const mk = mats();
     try {
       const M = 16;
@@ -196,8 +198,8 @@
       mk(Y); mk(Cr); mk(Cb);
 
       // Farbe: zweimal halbieren, weichzeichnen, wieder vergrößern (Farbrauschen ist grob und unauffällig)
-      const sig = TUNE.chroma0 + TUNE.chroma1 * s;
-      for (const C of [Cr, Cb]) {
+      const sig = Math.max(0.05, (TUNE.chroma0 + TUNE.chroma1 * s) * cm);
+      if (cm > 0.01) for (const C of [Cr, Cb]) {
         const a = mk(new cv.Mat()), b = mk(new cv.Mat());
         cv.pyrDown(C, a); cv.GaussianBlur(a, a, new cv.Size(0, 0), sig, sig, cv.BORDER_REPLICATE);
         cv.pyrDown(a, b); cv.GaussianBlur(b, b, new cv.Size(0, 0), sig, sig, cv.BORDER_REPLICATE);
@@ -213,7 +215,7 @@
       const rd = rgb.data32F;
       for (let yy = 0; yy < reg.h; yy++) {
         const si = yy * pw * 3, di = yy * reg.w * 3;
-        for (let x = 0; x < reg.w * 3; x++) { const v = rd[si + x]; out[di + x] = v < 0 ? 0 : v > 1 ? 1 : v; }
+        for (let x = 0; x < reg.w * 3; x++) { let v = rd[si + x]; v = v < 0 ? 0 : v > 1 ? 1 : v; out[di + x] = keep > 0 ? v * (1 - keep) + reg.d[di + x] * keep : v; }
       }
       return { w: reg.w, h: reg.h, d: out, x0: reg.x0, y0: reg.y0 };
     } finally { mk.free(); }
@@ -221,19 +223,99 @@
 
   // ------------------------------------------------------------------ Schärfen
   /** Schärft nur die Helligkeit; sehr feine Differenzen (Rauschen) werden nicht verstärkt. Verändert reg in place. */
-  JZO.sharpenRegion = function (reg, amount, sigma, weightFn) {
+  JZO.sharpenRegion = function (reg, amount, sigma, weightFn, o) {
     if (amount <= 0.001) return reg;
+    o = o || {};
+    const gateV = o.gate === undefined ? 0.25 : o.gate, halo = o.halo === undefined ? 0.5 : o.halo;
+    const lim = 0.02 + 0.3 * (1 - halo) * (1 - halo);
     const n = reg.w * reg.h, d = reg.d;
     const Y = lumaF(d, n), B = blurF(Y, reg.w, reg.h, sigma);
-    const nf = 0.004;
+    const nf = 0.001 + 0.012 * gateV;
     for (let i = 0; i < n; i++) {
       const det = Y[i] - B[i];
       let gate = (Math.abs(det) - nf) / (nf * 2); gate = gate < 0 ? 0 : gate > 1 ? 1 : gate;
       let delta = amount * 1.5 * det * gate;
+      delta = delta > lim ? lim : delta < -lim ? -lim : delta;
       if (weightFn) delta *= weightFn(i);
       d[3 * i] += delta; d[3 * i + 1] += delta; d[3 * i + 2] += delta;
     }
     return reg;
+  };
+
+
+  // ------------------------------------------------------------------ Licht, Farbe, Klarheit, Körnung
+  const ADJ_KEYS = ['exposure', 'contrast', 'highlights', 'shadows', 'whites', 'blacks', 'saturation', 'vibrance', 'temperature', 'tint', 'clarity', 'grain'];
+  JZO.hasAdjust = (S) => ADJ_KEYS.some((k) => Math.abs(S[k] || 0) > 0.001);
+  const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+
+  /** Ton- und Farbkorrektur für eine Kachel (Fließkomma 0..1), verändert reg in place. */
+  JZO.adjustRegion = function (reg, A) {
+    const n = reg.w * reg.h, d = reg.d, W = reg.w;
+    const ev = Math.pow(2, A.exposure || 0);
+    const t = A.temperature || 0, ti = A.tint || 0;
+    const wr = ev * (1 + 0.22 * t) * (1 + 0.05 * ti), wg = ev * (1 - 0.12 * ti), wb = ev * (1 - 0.22 * t) * (1 + 0.05 * ti);
+    const con = 1 + 0.8 * (A.contrast || 0), hl = A.highlights || 0, sh = A.shadows || 0, wh = A.whites || 0, bl = A.blacks || 0;
+    const sat = 1 + (A.saturation || 0), vib = A.vibrance || 0, grain = A.grain || 0, clarity = A.clarity || 0;
+    let blur = null;
+    if (Math.abs(clarity) > 0.001) blur = blurF(lumaF(d, n), reg.w, reg.h, A.clarSigma || 10);
+    const x0 = reg.x0 || 0, y0 = reg.y0 || 0;
+    for (let i = 0; i < n; i++) {
+      let r = d[3 * i] * wr, g = d[3 * i + 1] * wg, b = d[3 * i + 2] * wb;
+      let Y = 0.299 * r + 0.587 * g + 0.114 * b;
+      Y = Y < 0 ? 0 : Y > 1 ? 1 : Y;
+      // Lichter/Tiefen/Weiß/Schwarz als additive Helligkeitsänderung (erhält die Farbtöne)
+      let dY = 0;
+      if (sh) dY += 0.35 * sh * (1 - Y) * (1 - Y) * smooth(0, 0.25, Y);
+      if (hl) dY += 0.3 * hl * Y * Y * smooth(0.35, 0.9, Y);
+      if (wh) dY += 0.15 * wh * Y * Y * Y;
+      if (bl) dY += 0.1 * bl * (1 - Y) * (1 - Y) * (1 - Y);
+      if (blur) { const m = 1 - (2 * Y - 1) * (2 * Y - 1); dY += clarity * 1.2 * (Y - blur[i]) * m; }
+      r += dY; g += dY; b += dY;
+      if (con !== 1) { r = 0.5 + (r - 0.5) * con; g = 0.5 + (g - 0.5) * con; b = 0.5 + (b - 0.5) * con; }
+      if (sat !== 1 || vib) {
+        const y2 = 0.299 * r + 0.587 * g + 0.114 * b;
+        const mx = Math.max(r, g, b), mn = Math.min(r, g, b), sc = mx > 0.001 ? (mx - mn) / mx : 0;
+        const f = Math.max(0, sat * (1 + vib * (1 - sc)));
+        r = y2 + (r - y2) * f; g = y2 + (g - y2) * f; b = y2 + (b - y2) * f;
+      }
+      if (grain) {
+        const xx = x0 + (i % W), yy = y0 + ((i / W) | 0);
+        let h1 = Math.imul(xx, 374761393) + Math.imul(yy, 668265263); h1 = Math.imul(h1 ^ (h1 >>> 13), 1274126177); h1 ^= h1 >>> 16;
+        let h2 = Math.imul(xx + 977, 668265263) + Math.imul(yy + 131, 374761393); h2 = Math.imul(h2 ^ (h2 >>> 13), 1274126177); h2 ^= h2 >>> 16;
+        const nz = ((h1 >>> 0) / 4294967296 + (h2 >>> 0) / 4294967296 - 1) * 0.16 * grain * (1 - 0.6 * Math.abs(2 * Y - 1));
+        r += nz; g += nz; b += nz;
+      }
+      d[3 * i] = r < 0 ? 0 : r > 1 ? 1 : r; d[3 * i + 1] = g < 0 ? 0 : g > 1 ? 1 : g; d[3 * i + 2] = b < 0 ? 0 : b > 1 ? 1 : b;
+    }
+    return reg;
+  };
+
+  /** Wendet nur Licht/Farbe/Klarheit/Körnung an (ohne die langsamen Schritte). Liefert img selbst zurück, wenn nichts zu tun ist. */
+  JZO.applyAdjust = async function (img, S, ctx) {
+    if (!JZO.hasAdjust(S)) return img;
+    const A = Object.assign({}, S, { clarSigma: clamp(Math.max(img.w, img.h) / 200, 6, 14) });
+    return JZO.mapTiles(img, { tile: 512, margin: 48, ctx, onProgress: ctx && ctx.onProgress ? (f) => ctx.onProgress(f, 'Licht und Farbe') : null, fn: (reg) => JZO.adjustRegion(reg, A) });
+  };
+
+  /** Autopilot: schätzt das Rauschen (Median der Laplace-Antwort) und schlägt Einstellungen vor. */
+  JZO.analyze = function (img) {
+    const w = img.w, h = img.h, d = img.d, vals = [];
+    const step = Math.max(1, Math.floor(Math.sqrt((w * h) / 250000)));
+    const Y = (x, y) => { const i = (y * w + x) * 3; return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; };
+    for (let y = 1; y < h - 1; y += step) for (let x = 1; x < w - 1; x += step) {
+      const v = Y(x - 1, y - 1) - 2 * Y(x, y - 1) + Y(x + 1, y - 1) - 2 * Y(x - 1, y) + 4 * Y(x, y) - 2 * Y(x + 1, y) + Y(x - 1, y + 1) - 2 * Y(x, y + 1) + Y(x + 1, y + 1);
+      vals.push(Math.abs(v));
+    }
+    vals.sort((a, b) => a - b);
+    const med = vals.length ? vals[vals.length >> 1] : 0;
+    const sigma = med / 0.6745 / 6;
+    const edge = Math.max(w, h);
+    return {
+      sigma,
+      denoise: clamp(+(0.08 + sigma / 22).toFixed(2), 0, 0.95),
+      sharpen: sigma > 8 ? 0.2 : 0.3,
+      scale: edge < 800 ? 4 : edge < 1800 ? 2 : 1,
+    };
   };
 
   // ------------------------------------------------------------------ KI-Upscaling (Real-ESRGAN compact als ONNX)
@@ -436,12 +518,18 @@
 
   // ------------------------------------------------------------------ Gesamtablauf
   JZO.defaultSettings = () => ({
-    denoise: 0.4, sharpen: 0.3, scale: 1, ai: true,
+    denoise: 0.4, dnDetail: 0, dnColor: 0.5,
+    sharpen: 0.3, shRadius: 0.8, shGate: 0.25, shHalo: 0.5,
+    scale: 1, ai: true,
+    exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0,
+    saturation: 0, vibrance: 0, temperature: 0, tint: 0, clarity: 0, grain: 0,
     birds: false, birdMode: 'fast', birdBoxes: [], birdDetail: 0.7, birdBg: 0.4, birdTarget: 1200,
   });
   JZO.PRESETS = {
+    neutral: { denoise: 0, sharpen: 0 },
     standard: { denoise: 0.4, sharpen: 0.3 },
-    'hohe-iso': { denoise: 0.8, sharpen: 0.35 },
+    'hohe-iso': { denoise: 0.8, dnColor: 0.7, dnDetail: 0.1, sharpen: 0.35, shGate: 0.4 },
+    'natur-kraeftig': { denoise: 0.4, sharpen: 0.35, vibrance: 0.3, saturation: 0.1, clarity: 0.25, contrast: 0.1 },
     voegel: { denoise: 0.5, sharpen: 0.3, birds: true, birdDetail: 0.7, birdBg: 0.4, birdTarget: 1200 },
     'voegel-klein': { denoise: 0.6, sharpen: 0.3, birds: true, birdMode: 'thorough', birdDetail: 0.8, birdBg: 0.5, birdTarget: 1400 },
   };
@@ -494,14 +582,14 @@
 
     // 2) Entrauschen (Hintergrund stärker, Vogel schonender)
     let cur = img;
-    const base = S.denoise;
+    const base = S.denoise, dOpt = { color: (S.dnColor === undefined ? 0.5 : S.dnColor) * 2, keep: S.dnDetail || 0 };
     const bgS = union ? Math.min(1, base + S.birdBg) : base, birdS = base * 0.6;
     if (Math.max(base, bgS) > 0.01) {
       cur = await JZO.mapTiles(cur, {
         tile, margin: 32, ctx, onProgress: prog(0.2, 0.5, 'Entrauschen'),
         fn: (reg) => {
-          if (!union) return JZO.denoiseRegion(reg, base);
-          const a = JZO.denoiseRegion(reg, bgS), b = birdS > 0.01 ? JZO.denoiseRegion(reg, birdS) : reg;
+          if (!union) return JZO.denoiseRegion(reg, base, dOpt);
+          const a = JZO.denoiseRegion(reg, bgS, dOpt), b = birdS > 0.01 ? JZO.denoiseRegion(reg, birdS, dOpt) : reg;
           const out = new Float32Array(reg.d.length);
           for (let y = 0; y < reg.h; y++) for (let x = 0; x < reg.w; x++) {
             const i = y * reg.w + x, m = union[(reg.y0 + y) * img.w + (reg.x0 + x)] / 255;
@@ -529,8 +617,8 @@
       }
       up = await JZO.mapTiles(up, {
         tile, margin: 8, ctx, onProgress: prog(0.8, 0.88, 'Schärfen'),
-        fn: (reg) => JZO.sharpenRegion(reg, S.sharpen, 0.8 * Math.sqrt(scale),
-          unionUp ? (i) => { const y = Math.floor(i / reg.w), x = i - y * reg.w; return 0.5 + 0.5 * unionUp[(reg.y0 + y) * up.w + (reg.x0 + x)] / 255; } : null),
+        fn: (reg) => JZO.sharpenRegion(reg, S.sharpen, (S.shRadius || 0.8) * Math.sqrt(scale),
+          unionUp ? (i) => { const y = Math.floor(i / reg.w), x = i - y * reg.w; return 0.5 + 0.5 * unionUp[(reg.y0 + y) * up.w + (reg.x0 + x)] / 255; } : null, { gate: S.shGate, halo: S.shHalo }),
       });
     }
 
@@ -548,7 +636,7 @@
       for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) maskReg[(y + y0 - ry0) * rw + (x + x0 - rx0)] = b.mask[y * bw + x];
       const need = Math.ceil((S.birdTarget || 1200) / Math.max(size, 1));
       const f = Math.min(4, Math.max(scale, need));
-      const cropUp = await JZO.upscale(crop, f, useAI ? { session: ctx.session, tile: ctx.upTile || 192, signal: ctx.signal } : null, prog(0.88 + 0.1 * bi / birds.length, 0.88 + 0.1 * (bi + 1) / birds.length, 'Vogel ' + (bi + 1) + '/' + birds.length));
+      const cropUp = await JZO.upscale(crop, f, useAI ? { session: ctx.session, tile: ctx.upTile || 192, signal: ctx.signal } : null, prog(0.88 + 0.09 * bi / birds.length, 0.88 + 0.09 * (bi + 1) / birds.length, 'Vogel ' + (bi + 1) + '/' + birds.length));
       const mUp = resizeF(maskReg, rw, rh, cropUp.w, cropUp.h, 1);
       const soft = featherMask(mUp, cropUp.w, cropUp.h, size * f);
       const regUp = { w: cropUp.w, h: cropUp.h, d: cropF(cropUp, 0, 0, cropUp.w, cropUp.h) };
@@ -568,8 +656,11 @@
       }
       await tick();
     }
+    // 6) Licht, Farbe, Klarheit, Körnung (ganz am Ende, damit auch der Vogel mitzieht)
+    const preAdjust = up;   // Zustand vor Licht/Farbe, damit Licht-Regler später schnell nachgerechnet werden können
+    up = await JZO.applyAdjust(up, S, Object.assign({}, ctx, { onProgress: ctx.onProgress ? (f, t) => ctx.onProgress(0.97 + 0.03 * f, t) : null }));
     if (ctx.onProgress) ctx.onProgress(1, 'Fertig');
-    return { img: up, birds: birds.map((b) => b.box), birdCrops: crops };
+    return { img: up, base: preAdjust, birds: birds.map((b) => b.box), birdCrops: crops };
   };
 
   return JZO;

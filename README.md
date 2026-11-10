@@ -13,10 +13,11 @@ Alles wird im Browser auf deinem Rechner gerechnet, es wird nichts hochgeladen.
 
 ## Was die Web-App kann
 
-- **Foto:** Entrauschen, Schärfen, KI-Vergrößerung 2×/4× (Real-ESRGAN), Vorher/Nachher-Regler, Download als PNG/JPG.
+- **Foto:** Autopilot, Entrauschen (Stärke, Details, Farbrauschen), Schärfen (Radius, Rauschschutz, Haloschutz), KI-Vergrößerung 2×–4× (Real-ESRGAN), Licht (Belichtung, Kontrast, Lichter, Tiefen, Weiß, Schwarz), Farbe (Sättigung, Dynamik, Temperatur, Tönung), Klarheit, Körnung. Licht/Farbe wirken sofort. Verschieben/Zoomen mit Maus und Trackpad, Vorher/Nachher-Regler.
+- **Export (Foto):** JPG/PNG/WebP, Qualität, mehrere Größen auf einmal (Ordner oder ZIP).
 - **Vogel-Modus:** automatische Vogelerkennung (YOLOX) oder von Hand markieren, Freistellung (GrabCut), Vogel wird auf Arbeitsgröße
   gebracht, Federdetail herausgearbeitet, Hintergrund stärker entrauscht und weich zurückgesetzt.
-- **Video:** kurze Clips (FFmpeg.wasm): Vergrößern (Lanczos), Entrauschen, Schärfen, Stabilisieren, Bildrate/Zwischenbilder.
+- **Video** (FFmpeg.wasm, Clips bis 20 Minuten, Limit einstellbar; wird in Stücken gerechnet): Auflösung 720p–4K oder 2×–4×, Entrauschen (räumlich/zeitlich), Schärfen, Details wiederherstellen, Deinterlace, Stabilisieren, Zeitlupe/Zeitraffer, Bildrate mit Zwischenbildern, Farbe, Drehen, Zuschneiden, Ausschnitt, Export als H.264 oder ProRes in MP4/MOV/MKV, Vorschau (5 s), Standbild.
 
 ## Grenzen (ehrlich)
 
@@ -24,7 +25,7 @@ Alles wird im Browser auf deinem Rechner gerechnet, es wird nichts hochgeladen.
 - Tempo: In Chrome nutzt die App wenn möglich die Grafikkarte (WebGPU). Ohne WebGPU rechnet sie auf dem Prozessor, das ist langsam
   (Beispiel im Testlauf ohne GPU: ein 0,4-MP-Vogelfoto mit 2× und Vogel-Modus ca. 100 s). Erst „Vorschau“, dann „Ganzes Foto“.
 - 8 Bit pro Kanal, keine RAW-Dateien direkt (vorher als JPG/TIFF exportieren), keine Objektivkorrektur.
-- Video: klassische Filter, keine KI; nur kurze Clips bis etwa 1080p.
+- Video: klassische Filter, keine KI. Der Browser rechnet auf dem Prozessor und langsamer als Echtzeit; die fertige Datei muss in den Browser-Speicher passen (ca. 1,4 GB). H.265 gibt es im Browser nicht (die Browser-Version von FFmpeg hängt dabei).
 
 ## Entwickler: Tests
 
