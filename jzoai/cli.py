@@ -27,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", help="Installation und Rechengerät prüfen")
 
     m = sub.add_parser("models", help="KI-Modelle herunterladen")
-    m.add_argument("names", nargs="*", help=f"Namen ({', '.join(models.REGISTRY)}); leer = Standardsatz")
+    m.add_argument("names", nargs="*", help=f"Namen ({', '.join(models.REGISTRY)}, birds); leer = alle")
 
     f = sub.add_parser("photo", help="Foto(s) verarbeiten (RAW, JPG, TIFF, PNG)")
     f.add_argument("input", type=Path, help="Datei oder Ordner")
@@ -194,8 +194,13 @@ def cmd_video(a) -> int:
 
 
 def cmd_models(a) -> int:
-    names = a.names or ["general", "scunet"]
+    names = a.names or ["general", "scunet", "x4plus", "birds"]
     for n in names:
+        if n == "birds":  # Vogelerkennung: torchvision lädt die Gewichte beim ersten Anlegen
+            print("Lade Vogelerkennung (Mask R-CNN, ca. 180 MB) ...")
+            from .birds import BirdDetector
+            BirdDetector()
+            continue
         if n not in models.REGISTRY:
             print(f"Unbekanntes Modell: {n}", file=sys.stderr)
             return 1

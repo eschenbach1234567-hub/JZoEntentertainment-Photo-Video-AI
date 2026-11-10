@@ -7,20 +7,28 @@ bündelt sie in einer Oberfläche und einer Kommandozeile. Läuft auf macOS, auc
 > Modelle (Real-ESRGAN, SCUNet) und klassische Verfahren. Qualität und Tempo liegen unter den kommerziellen
 > Programmen, dafür gehört dir der Code, und der Vogel-Modus ist auf deine Arbeit zugeschnitten.
 
-## Installation (Mac)
+## Installation auf dem Mac (Schritt für Schritt, ohne Vorkenntnisse)
 
-```bash
-brew install python@3.11 ffmpeg exiftool     # ffmpeg nur für Video, exiftool optional (EXIF übernehmen)
-cd jzoai
-./install_mac.sh
-```
+1. **Programm holen:** Auf der GitHub-Seite des Projekts oben rechts auf den grünen Button **Code** klicken, dann
+   **Download ZIP**. Die heruntergeladene ZIP-Datei per Doppelklick entpacken und den Ordner an einen festen Ort legen
+   (zum Beispiel in *Dokumente*).
+2. **Installieren:** Im Ordner auf **`INSTALLIEREN.command`** doppelklicken.
+   - Meldet macOS, die Datei könne nicht geöffnet werden: **Rechtsklick auf die Datei, Öffnen, nochmal Öffnen**.
+     Das ist nur beim ersten Mal nötig.
+   - Es öffnet sich ein Terminal-Fenster. Es installiert alles Nötige selbst (Homebrew, Python, ffmpeg, die KI-Modelle).
+     Fragt es nach einer Bestätigung, tippe `j` und Enter. Fragt es nach deinem **Mac-Passwort**, tippe es ein.
+     Dabei erscheinen keine Zeichen, das ist normal.
+   - Das dauert 10 bis 30 Minuten und lädt etwa 1 GB. Am Ende steht **FERTIG** im Fenster.
+3. **Starten:** Ab jetzt immer auf **`START.command`** doppelklicken.
 
-Wichtig für Intel-Macs: PyTorch wird dort nur bis Version 2.2.2 gebaut. Darum Python 3.11 und die festen
-Versionen in `requirements.txt`. Prüfen mit `python -m jzoai doctor`.
+Wenn etwas schiefgeht: Den Text im Terminal-Fenster markieren, kopieren und weitergeben, dann lässt sich der Fehler finden.
+
+Hinweis für Intel-Macs: PyTorch wird dort nur bis Version 2.2.2 gebaut. Darum Python 3.11 und die festen Versionen in
+`requirements.txt`. Der Installer kümmert sich darum. Wer es von Hand will: `./install_mac.sh`, danach `python -m jzoai doctor`.
 
 ## Benutzung
 
-**Oberfläche:** `./jzoai_gui.command` (oder Doppelklick im Finder).
+**Oberfläche:** Doppelklick auf `START.command`.
 Foto öffnen, Preset wählen, per Klick einen 1000-px-Ausschnitt festlegen, **Vorschau** (Vorher/Nachher, Trennlinie
 ziehen), dann **Verarbeiten und speichern**. Ordner-Batch: **Ordner (Batch)**.
 
@@ -127,7 +135,7 @@ Radeon-GPU (Vulkan/ncnn) ist ein möglicher nächster Ausbau.
 
 ```bash
 python tests/test_synthetic.py   # ohne KI-Modelle
-python tests/test_ai.py          # mit KI-Modellen (nach ./install_mac.sh)
+python tests/test_ai.py          # mit KI-Modellen (nach der Installation)
 python tests/test_video.py       # Video (braucht ffmpeg), mit --no-ki ohne KI-Teil
 ```
 

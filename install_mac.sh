@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installation für macOS (getestet für Intel-Macs; funktioniert auch auf Apple Silicon).
+# Installiert die Python-Umgebung und die KI-Modelle (wird von INSTALLIEREN.command aufgerufen).
 set -e
 cd "$(dirname "$0")"
 
@@ -20,11 +20,10 @@ pip install --upgrade pip
 pip install -r requirements.txt
 
 echo
-echo "Lade KI-Modelle (ca. 80 MB) ..."
+echo "Lade KI-Modelle (ca. 350 MB) ..."
 python -m jzoai models
 
 echo
 python -m jzoai doctor
 echo
-echo "Optional, für EXIF-Übernahme und Objektivkorrektur:  brew install exiftool"
-echo "Fertig. Oberfläche starten:  ./jzoai_gui.command   (oder: python -m jzoai.gui)"
+echo "Fertig. Oberfläche starten: START.command (Doppelklick)"
