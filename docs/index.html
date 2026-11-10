@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JZo Entertainment Foto Video AI</title>
+<meta name="description" content="Fotos und Videos im Browser verbessern: Entrauschen, Schärfen, KI-Upscaling und ein Vogel-Modus.">
+<meta name="theme-color" content="#0f1216">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">JZO</span><div><h1>JZo Entertainment Foto Video AI</h1><p>Läuft komplett in deinem Browser – deine Dateien bleiben auf deinem Gerät.</p></div></div>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="photo" role="tab">Foto</button>
+    <button class="tab" data-tab="video" role="tab">Video</button>
+    <button class="tab" data-tab="help" role="tab">Hilfe</button>
+  </nav>
+</header>
+
+<main>
+<!-- ============================== FOTO ============================== -->
+<section id="tab-photo" class="panel active">
+  <div class="layout">
+    <div class="stagecol">
+      <div id="drop" class="drop">
+        <div class="drop-inner">
+          <strong>Foto hierher ziehen</strong>
+          <span>oder</span>
+          <label class="btn primary">Foto auswählen<input id="file" type="file" accept="image/*" hidden></label>
+          <small>JPG, PNG, WebP, TIFF/HEIC (je nach Browser). RAW-Dateien (CR2, NEF, ARW …) bitte vorher als JPG oder TIFF exportieren.</small>
+        </div>
+      </div>
+      <div id="viewer" class="viewer hidden">
+        <div class="viewbar">
+          <span id="fileinfo"></span>
+          <span class="spacer"></span>
+          <button id="btn-zoom" class="btn small">Lupe 100 %</button>
+          <button id="btn-back" class="btn small hidden">Zurück zum Original</button>
+          <label class="btn small">Anderes Foto<input id="file2" type="file" accept="image/*" hidden></label>
+        </div>
+        <div id="scroller" class="scroller">
+          <div id="stage" class="stage">
+            <canvas id="c-before"></canvas>
+            <canvas id="c-after" class="hidden"></canvas>
+            <canvas id="c-over"></canvas>
+          </div>
+        </div>
+        <div id="cmp" class="cmp hidden"><span>Vorher</span><input id="cmp-range" type="range" min="0" max="100" value="50"><span>Nachher</span></div>
+        <p id="markhint" class="hint hidden">Vogel markieren: Rahmen mit der Maus aufziehen. Mehrere Vögel sind möglich.</p>
+      </div>
+    </div>
+
+    <aside class="side">
+      <h2>Einstellungen</h2>
+      <div class="field">
+        <label for="preset">Voreinstellung</label>
+        <select id="preset">
+          <option value="standard">Standard</option>
+          <option value="hohe-iso">Hohe ISO / verrauscht</option>
+          <option value="voegel">Vogelfoto</option>
+          <option value="voegel-klein">Vogelfoto – kleine Vögel</option>
+        </select>
+      </div>
+      <div class="field"><label>Entrauschen <output id="o-denoise"></output></label><input id="denoise" type="range" min="0" max="1" step="0.05"></div>
+      <div class="field"><label>Schärfen <output id="o-sharpen"></output></label><input id="sharpen" type="range" min="0" max="1" step="0.05"></div>
+      <div class="field">
+        <label for="scale">Vergrößern</label>
+        <select id="scale"><option value="1">Original (1×)</option><option value="2">2×</option><option value="4">4×</option></select>
+      </div>
+      <div class="field check"><label><input id="ai" type="checkbox" checked> KI-Vergrößerung (Real-ESRGAN)</label><small>Aus = schneller, klassische Vergrößerung.</small></div>
+
+      <details id="birdbox" class="bird">
+        <summary><label class="check"><input id="birds" type="checkbox"> <strong>Vogel-Modus</strong></label></summary>
+        <div class="field">
+          <label for="birdMode">Suche</label>
+          <select id="birdMode"><option value="fast">Schnell (große/mittlere Vögel)</option><option value="thorough">Gründlich (auch kleine Vögel, langsam)</option></select>
+        </div>
+        <div class="field"><label>Federdetail <output id="o-birdDetail"></output></label><input id="birdDetail" type="range" min="0" max="1" step="0.05"></div>
+        <div class="field"><label>Hintergrund zusätzlich entrauschen <output id="o-birdBg"></output></label><input id="birdBg" type="range" min="0" max="1" step="0.05"></div>
+        <div class="field"><label for="birdTarget">Arbeitsgröße des Vogels (lange Kante)</label>
+          <select id="birdTarget"><option value="800">800 px</option><option value="1200">1200 px</option><option value="1600">1600 px</option><option value="2000">2000 px</option></select>
+          <small>Kleine Vögel werden intern auf diese Größe gebracht, bearbeitet und zurückgesetzt.</small></div>
+        <div class="row">
+          <button id="btn-mark" class="btn small">Vögel von Hand markieren</button>
+          <button id="btn-clear" class="btn small">Markierungen löschen</button>
+        </div>
+        <p id="markcount" class="hint"></p>
+      </details>
+
+      <div class="row actions">
+        <button id="btn-preview" class="btn" disabled>Vorschau (Ausschnitt)</button>
+        <button id="btn-run" class="btn primary" disabled>Ganzes Foto verarbeiten</button>
+      </div>
+      <div id="progress" class="progress hidden">
+        <div class="bar"><div id="bar-fill"></div></div>
+        <div class="row"><span id="ptext">…</span><span class="spacer"></span><button id="btn-cancel" class="btn small">Abbrechen</button></div>
+      </div>
+      <div id="result" class="result hidden">
+        <h3>Ergebnis</h3>
+        <div class="row">
+          <button id="dl-png" class="btn primary">PNG laden</button>
+          <button id="dl-jpg" class="btn">JPG laden</button>
+        </div>
+        <div id="crops" class="crops"></div>
+      </div>
+      <div id="status" class="status"></div>
+      <pre id="log" class="log hidden"></pre>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================== VIDEO ============================== -->
+<section id="tab-video" class="panel">
+  <div class="layout">
+    <div class="stagecol">
+      <div id="vdrop" class="drop">
+        <div class="drop-inner">
+          <strong>Video hierher ziehen</strong><span>oder</span>
+          <label class="btn primary">Video auswählen<input id="vfile" type="file" accept="video/*" hidden></label>
+          <small>Am besten kurze Clips (bis ca. 30 Sekunden, bis 1080p). Das Video wird im Browser verarbeitet – das braucht Zeit und Arbeitsspeicher.</small>
+        </div>
+      </div>
+      <div id="vviewer" class="viewer hidden">
+        <div class="viewbar"><span id="vinfo"></span><span class="spacer"></span><label class="btn small">Anderes Video<input id="vfile2" type="file" accept="video/*" hidden></label></div>
+        <video id="vplayer" controls playsinline></video>
+        <div id="vresultbox" class="hidden"><h3>Ergebnis</h3><video id="vout" controls playsinline></video><div class="row"><a id="vdl" class="btn primary" download="video_jzo.mp4">Video laden</a></div></div>
+      </div>
+    </div>
+    <aside class="side">
+      <h2>Video-Einstellungen</h2>
+      <div class="field"><label for="vscale">Vergrößern</label>
+        <select id="vscale"><option value="1">Original</option><option value="1.5">1,5×</option><option value="2" selected>2×</option><option value="3">3×</option></select></div>
+      <div class="field"><label>Entrauschen <output id="o-vdenoise"></output></label><input id="vdenoise" type="range" min="0" max="1" step="0.05" value="0.4"></div>
+      <div class="field"><label>Schärfen <output id="o-vsharpen"></output></label><input id="vsharpen" type="range" min="0" max="1" step="0.05" value="0.3"></div>
+      <div class="field check"><label><input id="vstab" type="checkbox"> Verwacklungen glätten</label></div>
+      <div class="field"><label for="vfps">Bildrate</label>
+        <select id="vfps"><option value="0">Original</option><option value="30">30 fps</option><option value="48">48 fps</option><option value="60">60 fps</option></select>
+        <small>Höhere Bildrate berechnet Zwischenbilder – sehr rechenintensiv.</small></div>
+      <div class="field"><label for="vinterp">Zwischenbilder</label>
+        <select id="vinterp"><option value="blend">Überblenden (schnell)</option><option value="mci">Bewegungsbasiert (sehr langsam)</option></select></div>
+      <div class="field"><label>Ausschnitt: Start (Sek.) <input id="vstart" type="number" min="0" step="0.5" value="0" class="num"></label></div>
+      <div class="field"><label>Länge (Sek., 0 = bis Ende) <input id="vlen" type="number" min="0" step="0.5" value="10" class="num"></label></div>
+      <div class="row actions"><button id="vrun" class="btn primary" disabled>Video verarbeiten</button></div>
+      <div id="vprogress" class="progress hidden"><div class="bar"><div id="vbar"></div></div><div class="row"><span id="vtext">…</span><span class="spacer"></span><button id="vcancel" class="btn small">Abbrechen</button></div></div>
+      <div id="vstatus" class="status"></div>
+      <p class="hint">Hinweis: Die Video-Verarbeitung nutzt klassische Filter (Lanczos, Entrauschen, Schärfen). KI-Video-Upscaling gibt es im Browser nicht.</p>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================== HILFE ============================== -->
+<section id="tab-help" class="panel">
+  <div class="help">
+    <h2>So funktioniert's</h2>
+    <ol>
+      <li>Foto auf die Seite ziehen oder auswählen.</li>
+      <li>Voreinstellung wählen (z. B. <em>Vogelfoto</em>) und bei Bedarf die Regler anpassen.</li>
+      <li><strong>Vorschau</strong> rechnet nur einen Ausschnitt – schnell zum Ausprobieren. <strong>Ganzes Foto verarbeiten</strong> rechnet alles.</li>
+      <li>Mit dem Regler unter dem Bild Vorher/Nachher vergleichen, dann als PNG oder JPG herunterladen.</li>
+    </ol>
+    <h2>Vogel-Modus</h2>
+    <p>Die App sucht Vögel automatisch (KI-Erkennung) oder du ziehst selbst einen Rahmen um den Vogel. Der Vogel wird freigestellt, auf Arbeitsgröße gebracht (auch wenn er im Bild winzig ist), Federn werden herausgearbeitet, der Hintergrund stärker entrauscht und alles weich ins Foto zurückgesetzt.</p>
+    <h2>Als App auf den Mac legen</h2>
+    <p><strong>Chrome:</strong> Adressleiste rechts → Installieren-Symbol, oder Menü ⋮ → „Speichern und teilen“ → „Seite als App installieren“.<br>
+    <strong>Safari:</strong> Menü „Ablage“ → „Zum Dock hinzufügen“.</p>
+    <h2>Gut zu wissen</h2>
+    <ul>
+      <li>Alles läuft lokal in deinem Browser. Nichts wird hochgeladen. Beim ersten Start werden die KI-Bausteine (ca. 50 MB) aus dem Internet geladen.</li>
+      <li>Chrome nutzt, wenn möglich, deine Grafikkarte (WebGPU) – das ist deutlich schneller. Ohne WebGPU rechnet die App auf dem Prozessor, dann dauern große Fotos länger. Tipp: erst Vorschau, dann ganzes Foto.</li>
+      <li>Die Bearbeitung arbeitet mit 8 Bit pro Farbkanal. RAW-Dateien werden nicht direkt gelesen.</li>
+      <li>Sehr große Fotos (über ca. 40 Megapixel) können den Browser-Speicher sprengen – dann Vergrößerung auf 1× stellen oder das Foto vorher verkleinern.</li>
+    </ul>
+  </div>
+</section>
+</main>
+
+<footer>JZo Entertainment Foto Video AI · Modelle: Real-ESRGAN (BSD-3), YOLOX (Apache-2.0) · OpenCV.js · ONNX Runtime Web · FFmpeg.wasm</footer>
+
+<script src="js/jzo-core.js"></script>
+<script src="js/app.js"></script>
+<script src="js/video.js"></script>
+<script>if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});</script>
+</body>
+</html>

@@ -1,11 +1,38 @@
-# JZoEntertainment Photo/Video AI
+# JZo Entertainment Foto Video AI
 
-Eigenes Foto- und Video-Veredelungstool (RAW/JPG/TIFF, MP4/MOV) mit **Vogel-Modus**. Baut auf freien KI-Modellen auf und
-bündelt sie in einer Oberfläche und einer Kommandozeile. Läuft auf macOS, auch auf Intel-Macs.
+**Die Web-App** (Hauptweg): Link öffnen, Foto oder Video hineinziehen, Ergebnis herunterladen. Kein Terminal, keine Installation.
+Alles wird im Browser auf deinem Rechner gerechnet, es wird nichts hochgeladen.
 
-> **Einordnung:** JZoEntertainment Photo/Video AI ist kein Nachbau von Topaz Photo AI oder DxO PureRAW. Es nutzt frei verfügbare
-> Modelle (Real-ESRGAN, SCUNet) und klassische Verfahren. Qualität und Tempo liegen unter den kommerziellen
-> Programmen, dafür gehört dir der Code, und der Vogel-Modus ist auf deine Arbeit zugeschnitten.
+## Web-App einschalten (einmalig, ca. 2 Minuten)
+
+1. Auf GitHub in dieses Projekt gehen, oben **Settings** (Zahnrad) anklicken.
+2. Links **Pages** wählen.
+3. Bei *Build and deployment* → *Source*: **Deploy from a branch**. Bei *Branch*: **main** und daneben den Ordner **/docs**. **Save**.
+4. Nach etwa einer Minute steht oben auf der Pages-Seite der Link (`https://<dein-name>.github.io/<projektname>/`). Das ist deine App.
+5. Link im Browser öffnen. Als App ablegen: Chrome → Installieren-Symbol in der Adresszeile; Safari → *Ablage → Zum Dock hinzufügen*.
+
+## Was die Web-App kann
+
+- **Foto:** Entrauschen, Schärfen, KI-Vergrößerung 2×/4× (Real-ESRGAN), Vorher/Nachher-Regler, Download als PNG/JPG.
+- **Vogel-Modus:** automatische Vogelerkennung (YOLOX) oder von Hand markieren, Freistellung (GrabCut), Vogel wird auf Arbeitsgröße
+  gebracht, Federdetail herausgearbeitet, Hintergrund stärker entrauscht und weich zurückgesetzt.
+- **Video:** kurze Clips (FFmpeg.wasm): Vergrößern (Lanczos), Entrauschen, Schärfen, Stabilisieren, Bildrate/Zwischenbilder.
+
+## Grenzen (ehrlich)
+
+- Läuft nur mit Internet (Bausteine werden aus dem Netz geladen; die KI-Modelle liegen in `docs/models`).
+- Tempo: In Chrome nutzt die App wenn möglich die Grafikkarte (WebGPU). Ohne WebGPU rechnet sie auf dem Prozessor, das ist langsam
+  (Beispiel im Testlauf ohne GPU: ein 0,4-MP-Vogelfoto mit 2× und Vogel-Modus ca. 100 s). Erst „Vorschau“, dann „Ganzes Foto“.
+- 8 Bit pro Kanal, keine RAW-Dateien direkt (vorher als JPG/TIFF exportieren), keine Objektivkorrektur.
+- Video: klassische Filter, keine KI; nur kurze Clips bis etwa 1080p.
+
+## Entwickler: Tests
+
+`web-tests/` enthält Browser-Tests (headless Chrome, Node, puppeteer-core). Siehe `web-tests/server.js` und `run-*.js`.
+
+---
+
+# Python-Version (Desktop, optional)
 
 ## Installation auf dem Mac (Schritt für Schritt, ohne Vorkenntnisse)
 

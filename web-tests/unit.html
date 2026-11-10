@@ -1,0 +1,106 @@
+<!doctype html><meta charset="utf-8"><title>JZO Test</title>
+<script src="/libs/opencv/opencv.js"></script>
+<script src="/libs/ort/ort.min.js"></script>
+<script src="/docs/js/jzo-core.js"></script>
+<script>
+window.__log = [];
+const log = (...a) => { window.__log.push(a.join(' ')); };
+function rng(seed){ let s=seed>>>0; return ()=>{ s=(s*1664525+1013904223)>>>0; return s/4294967296; }; }
+function gauss(r){ return Math.sqrt(-2*Math.log(r()+1e-12))*Math.cos(2*Math.PI*r()); }
+function scene(w,h){
+  const img=JZO.newImg(w,h);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+    const i=(y*w+x)*3;
+    let r=60+120*x/w, g=90+80*y/h, b=140;
+    // Kreis, Streifen, Kante
+    if((x-w*0.3)**2+(y-h*0.4)**2<(h*0.2)**2){r=220;g=180;b=60;}
+    if(x>w*0.55 && Math.floor((x+y)/6)%2===0){r*=0.6;g*=0.7;b*=0.9;}
+    if(y>h*0.75){r=40;g=60;b=50+30*Math.sin(x/5);}
+    img.d[i]=r;img.d[i+1]=g;img.d[i+2]=b;
+  }
+  return img;
+}
+function noisy(img,sig,seed){
+  const r=rng(seed),o=JZO.newImg(img.w,img.h);
+  for(let i=0;i<img.d.length;i++)o.d[i]=img.d[i]+gauss(r)*sig;
+  // Farbrauschen
+  return o;
+}
+function psnr(a,b){let s=0;for(let i=0;i<a.d.length;i++){const d=a.d[i]-b.d[i];s+=d*d;}s/=a.d.length;return 10*Math.log10(255*255/s);}
+window.runTests = async function(){
+  const out = {};
+  JZO.setLibs({cv, ort});
+  const clean = scene(384,288), n = noisy(clean, 18, 7);
+  out.psnr_noisy = psnr(clean,n);
+  out.denoise = {};
+  for (const s of [0.2,0.4,0.6,0.8,1.0]) {
+    const t=performance.now();
+    const r = await JZO.mapTiles(n,{tile:512,margin:32,fn:(reg)=>JZO.denoiseRegion(reg,s)});
+    out.denoise[s] = { psnr: psnr(clean,r), ms: Math.round(performance.now()-t) };
+  }
+  // Schärfen darf Rauschen nicht aufblasen
+  const dn = await JZO.mapTiles(n,{tile:512,margin:32,fn:(reg)=>JZO.denoiseRegion(reg,0.6)});
+  const sh = await JZO.mapTiles(dn,{tile:512,margin:8,fn:(reg)=>JZO.sharpenRegion(reg,0.5,0.8)});
+  out.sharpen_psnr = psnr(clean, sh);
+  // Kachelnähte: Ergebnis mit kleinen Kacheln ≈ großen Kacheln
+  const small = await JZO.mapTiles(n,{tile:160,margin:32,fn:(reg)=>JZO.denoiseRegion(reg,0.6)});
+  const big = await JZO.mapTiles(n,{tile:512,margin:32,fn:(reg)=>JZO.denoiseRegion(reg,0.6)});
+  out.tile_consistency_psnr = psnr(small,big);
+  // Lanczos-Upscale ohne KI
+  const up = await JZO.upscale(clean,2,null);
+  out.up2 = [up.w, up.h];
+  return out;
+};
+window.runModels = async function(){
+  const out = {};
+  JZO.setLibs({cv, ort});
+  ort.env.wasm.wasmPaths = '/libs/ort/';
+  ort.env.wasm.numThreads = 1;
+  const load = async (u, ep) => ort.InferenceSession.create(u, {executionProviders: ep});
+  let t = performance.now();
+  const esr = await load('/docs/models/esrgan_general_x4v3.onnx', ['wasm']);
+  out.esr_load_ms = Math.round(performance.now()-t);
+  out.esr_io = [esr.inputNames, esr.outputNames];
+  const yolo = await load('/docs/models/yolox_s.onnx', ['wasm']);
+  out.yolo_io = [yolo.inputNames, yolo.outputNames];
+  async function imgFrom(url){
+    const im = new Image(); im.src = url; await im.decode();
+    const c = document.createElement('canvas'); c.width=im.naturalWidth; c.height=im.naturalHeight;
+    const g = c.getContext('2d'); g.drawImage(im,0,0);
+    return JZO.fromImageData(g.getImageData(0,0,c.width,c.height));
+  }
+  const eagle = await imgFrom('/assets/eagle.jpg'), dog = await imgFrom('/assets/dog.jpg');
+  out.sizes = {eagle:[eagle.w,eagle.h], dog:[dog.w,dog.h]};
+  t = performance.now();
+  out.eagle_birds = (await JZO.detectBirds(yolo, eagle, {mode:'fast'}, {})).map(d=>({s:+d.score.toFixed(2), b:d.box.map(Math.round)}));
+  out.eagle_ms = Math.round(performance.now()-t);
+  out.dog_birds = (await JZO.detectBirds(yolo, dog, {mode:'fast'}, {})).map(d=>({s:+d.score.toFixed(2), b:d.box.map(Math.round)}));
+  // ESRGAN auf kleinem Ausschnitt
+  const crop = JZO.cropImg(dog, 100, 100, 96, 96);
+  t = performance.now();
+  const up = await JZO.upscale(crop, 4, {session: esr, tile: 192});
+  out.esr_ms = Math.round(performance.now()-t);
+  const base = JZO.resizeImg(crop, 384, 384);
+  out.esr_vs_lanczos_psnr = psnr(base, up);
+  out.esr_size = [up.w, up.h];
+  window.__eagleUp = null;
+  // GrabCut + Vogelpass
+  if (out.eagle_birds.length) {
+    const bb = JZO.birdFromBox(eagle, out.eagle_birds[0].b);
+    let cnt=0; for (const v of bb.mask) cnt+=v;
+    out.mask_fraction = +(cnt/bb.mask.length).toFixed(2);
+  }
+  // Vollpipeline auf Ausschnitt des Adlers
+  const S = Object.assign(JZO.defaultSettings(), {birds:true, scale:2, ai:true, denoise:0.4, sharpen:0.3});
+  t = performance.now();
+  const small = JZO.resizeImg(eagle, Math.round(eagle.w/2), Math.round(eagle.h/2));
+  const res = await JZO.processPhoto(small, S, {session: esr, detector: yolo, tile:512, upTile:192});
+  out.pipeline_ms = Math.round(performance.now()-t);
+  out.pipeline = {w:res.img.w,h:res.img.h,birds:res.birds,crops:res.birdCrops.map(c=>[c.w,c.h])};
+  // Bild zum Anschauen
+  const cv2 = document.createElement('canvas'); cv2.width=res.img.w; cv2.height=res.img.h;
+  cv2.getContext('2d').putImageData(new ImageData(JZO.toRGBA(res.img),res.img.w,res.img.h),0,0);
+  out.png = cv2.toDataURL('image/jpeg',0.85);
+  return out;
+};
+</script>
